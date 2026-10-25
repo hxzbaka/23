@@ -256,11 +256,11 @@ index 0000000..a044ad0
 +#endif /* ! ASSEMBLER */
 +
 +/*
-+ * Qualcomm numbers the architected timer PPIs 1/2/3/0 (secure phys, phys,
-+ * virt, hyp) instead of the usual 13/14/11/10: the virtual timer XNU uses
-+ * (CNTV) is INTID 16 + 3 = 19.
++ * UMS512 exposes the architected timer PPI offsets as 13/14/11/10 (secure
++ * phys, physical, virtual, hypervisor); the virtual timer's GIC INTID is
++ * 16 + 11 = 27.
 + */
-+#define SWEET_VTIMER_INTID        19
++#define SWEET_VTIMER_INTID        27
 +#define SWEET_IPI_SGI             1       // SGI used for cross-CPU signals
 +
 +#define GIC_SPURIOUS_IRQ          1023    // IRQ no. for GIC spurious interrupt
@@ -307,7 +307,7 @@ index 9454534..88e524a 100644
 +
 +#define MAX_L2_CLINE                   6
 +#define MAX_CPUS                       8
-+#define MAX_CPU_CLUSTERS               1
++#define MAX_CPU_CLUSTERS               2
 +
 +#define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
 +

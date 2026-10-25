@@ -45,7 +45,12 @@ ABL (stock Xiaomi bootloader, unlocked)
               -> dyld + shared cache -> launchd -> daemons -> backboardd + SpringBoard
 ```
 
-There is no serial port (the debug UART is wired as SPI on this board). The kernel draws its console into the framebuffer that ABL leaves at `0x9c000000`, and keeps a persistent 4 MiB log ring at the end of `userdata`. You read that log from OrangeFox recovery with `tools/sweet-log-pull.sh`, so you don't have to film the screen.
+The UMS512 board exposes its debug UART at `0x70100000`; the firmware keeps
+its clock enabled, so XNU uses a polled Spreadtrum console during early boot.
+The kernel also draws its console into the framebuffer that UEFI leaves at
+`0x9e000000`. It keeps a persistent 4 MiB log ring at the end of `userdata`.
+You read that log from OrangeFox recovery with `tools/sweet-log-pull.sh`, so
+you don't have to film the screen.
 
 ## How to do it yourself
 
@@ -190,7 +195,8 @@ Not in git: partition backups, live device trees, recovery images, Apple firmwar
 ## Key hardware facts
 
 - RAM: payloads use the upper bank, `0x100000000` + `0xfcc00000` (about 3.95 GiB), above Qualcomm's protected carve-outs.
-- GICv3 with security extensions: the timer goes through Group 1 IRQ (virtual timer INTID 19), not FIQ as on Apple silicon.
+- GICv3 with security extensions: the timer goes through Group 1 IRQ (UMS512
+  timer PPI offset 11, actual GIC INTID 27), not FIQ as on Apple silicon.
 - PSCI through `smc`, 19.2 MHz timer, ARMv8.2 without pointer authentication. MPIDR uses Aff1 for the core number.
 - Panel: 1080×2400 DSC video mode, continuous splash from ABL, no refresh kick needed.
 - Touch: Goodix GT9896 at I²C `0x5d` on QUP SE7 (`0xa84000`), powered by PM6150L LDO11 through RPMh.

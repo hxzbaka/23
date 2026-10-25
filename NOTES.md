@@ -1,5 +1,40 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## 2026-10-24: UMS512 baseline copied from a compiling tree
+
+This checkout is the clean compiling baseline supplied by the user. The
+previous export-header `arm//protos.h` workaround was not carried over because
+this tree must first be validated unchanged. The UMS512 bring-up uses an
+explicit dependency-closed patch allowlist in the default `sprd-early` Action
+profile. It keeps the XNU/SWEET platform, ramdisk, GIC/timer, SMP, and
+`0083-sprd-uart-framebuffer-console.patch` pieces, while excluding Qualcomm
+UFS/USB/touch/battery/network and eMMC integration. The Action prints
+`SPRD UART/framebuffer console patch staged` before building.
+
+The ADT generator now describes the supplied T610YP hardware: GICD
+`0x12000000`, GICR `0x12040000`, virtual timer PPI offset 11 (actual GIC INTID
+27), timer/PMU interrupt tuples from the supplied device tree, UART `0x70100000`, and framebuffer
+`0x9e000000`. QEMU keeps its separate GIC and timer values. The generated
+UART node documents the firmware-owned always-on clock; the XNU console patch
+still uses the fixed UART mapping during earliest boot.
+
+The CPU nodes now match the supplied T610 DTS: six `arm,cortex-a55` cores at
+MPIDs `0x000..0x500` and two `arm,cortex-a75` cores at `0x600..0x700`, with
+two cluster IDs. This is an ADT correction; it does not add any storage driver.
+
+The phone ADT no longer emits the old Qualcomm `sweet-ufs` node by default;
+`tools/mkadt.py --ufs` is now an explicit opt-in for the original Qualcomm
+board. This prevents the T610YP boot description from advertising a nonexistent
+UFS controller while storage is intentionally deferred.
+
+The early XNU assembly/C mapping, shim framebuffer handoff, and QEMU decoder
+were also aligned to framebuffer `0x9e000000`; leaving the old `0x9c000000`
+constant would make early console writes miss the UEFI framebuffer.
+
+The shim's phone-side GIC constants are aligned too: GICD/GICR are
+`0x12000000`/`0x12040000`, and its timer probes use actual INTIDs 27 (virtual)
+and 30 (physical), corresponding to DT PPI offsets 11 and 14.
+
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<
@@ -266,7 +301,7 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
 - Keep this file current at every milestone so another agent can resume immediately, including when usage limits interrupt a session.
 - Patch 0017 committed/pushed `aa3f991`, Actions `38751507437` running: https://github.com/dipa-studio/ios-sweet/actions/runs/38751507437. Next artifacts: xnu/out-0017, research/bt21, research/run21.log. Do not duplicate.
 - Patch 0016 kernel downloaded/checksum verified: SHA256 `d06336c54baa06e0df6561a8bd7df98a9b9f7502c9381c62d1a44c045cd1ce46`, `xnu/out-0016/kernel.development.sweet`; buildtree/log `research/bt20` / `research/run20.log`. QEMU `research/q0016` (10s) prints platform expert registered, zero unknown glyphs, no panic observed BUT stalls (timer mapping still wrong until 0017). Direct actual-kernel GDB tests passed for registered instance and target/product names, including maxLength=1/0 and NULL, sentinels intact (`research/check-platform.gdb`, `research/check-platform3.log`, `research/q0016-api3`). First two fixture attempts used premature/wrong return breakpoints; discarded, corrected fixture uses start-return observation then a function-entry return trap. No phone boot yet.
-- Patch 0016 CI `38750733996` PASSED (4m3s); artifacts not yet downloaded/booted. Patch 0017 prepared to fix QEMU timer fidelity BEFORE interpreting future no-panic/stall runs: actual `qemu-system-aarch64 -M virt,gic-version=3,dumpdtb=research/qemu-virt.dtb ...` timer property has virtual PPI 11 => INTID 27, while phone uses INTID 19. Kernel formerly hardcoded 19. New optional /arm-io/gic virtual-timer-intid property selects the PPI (validate exact u32 and 16..31); missing property retains phone default 19. One RO-late global drives GIC enable and sleh_irq dispatch. tools/mkadt.py emits phone19/QEMU27. Both C TUs compile (`research/timer-objs`), ADT serialize/parse checks confirm values/addresses, all 17 patches apply and match. Sandbox `research/bt19/xnu`, originals `research/pre0017`; initial local sleh compile failed due read-only exported header not updated, fixed export and BOTH recompiled successfully. CI exports normally.
+- Patch 0016 CI `38750733996` PASSED (4m3s); artifacts not yet downloaded/booted. Patch 0017 fixed timer selection using the actual GIC INTID: a DT PPI offset 11 maps to INTID 27 (`16 + 11`). The optional `/arm-io/gic` `virtual-timer-intid` property is validated as an actual PPI INTID in 16..31; `tools/mkadt.py` emits 27 for both the UMS512 phone and QEMU. The older phone-19 note applied to the previous Qualcomm ADT and is superseded.
 - Architecture correction for next agent: CURRENT SWEET board_config does NOT define USE_APPLEARMSMP; it compiles the legacy IOCPU path, not cpu_boot_thread/IOPMGR AppleARMSMP. Existing roadmap mentions AppleARMSMP as a future approach. Do not look for gCPUIC/gAIC/gPMGR globals in the current kernel: they are absent. Determine the actual CPU-init wait after platform registration before choosing the next driver architecture.
 - Patch 0016 committed/pushed as `0dcdf5c`; Actions `38750733996` running: https://github.com/dipa-studio/ios-sweet/actions/runs/38750733996. Next artifacts: `xnu/out-0016`, `research/bt20`, `research/run20.log`.
 - Patch 0016 implemented: new `iokit/Kernel/arm/SweetPlatformExpert.cpp`, arm64 source list, built-in personality in KernelConfigTables.cpp guarded by ARM64_BOARD_CONFIG_SWEET. Matches only xiaomi,sweet at score 10000, keeps IOPanicPlatform fallback for other hardware. Uses IODTPlatformExpert base initialization/power domain and createNubs CPU logical-ID annotation; overrides top-level publishing because base requires nonexistent Apple NVRAM /options. Publishes real CPU/top-level nodes, provides bounded target/product names, and registers the platform service. GIC/PMGR and arm-io child-bus drivers remain separate work. Both C++ TUs compile (`research/platform-objs`), all imports resolve against 0015/own objects, all 16 patches apply and sources match. Sandbox `research/bt19/xnu`; originals `research/pre0016`. NEXT: full Actions/QEMU; inspect CPU boot waits after the platform registers, do not equate absence of panic with successful boot.

@@ -2,7 +2,8 @@
 """Build the minimal Apple Device Tree that the SWEET xnu needs to boot.
 
 Only what the early boot path actually reads (see NOTES.md); every MMIO
-address comes from the sweet live FDT. Usage:  mkadt.py OUT.adt [--dump] [--qemu] [--highmem]
+address comes from the target live FDT. Usage: mkadt.py OUT.adt [--dump]
+  [--qemu] [--highmem] [--ufs]
 """
 import hashlib, os, struct, sys
 
@@ -26,18 +27,29 @@ HIGH_MEM_SIZE = 0xfcc00000
 # /arm-io children are relative to this; it must not be 0 (serial_init bails)
 SOC_BASE = 0x01000000
 
-GICD, GICD_SIZE = 0x17a00000, 0x10000
-GICR, GICR_SIZE = 0x17a60000, 0x100000
-FB, FB_SIZE = 0x9c000000, 0x1700000
+GICD, GICD_SIZE = 0x12000000, 0x20000
+GICR, GICR_SIZE = 0x12040000, 0x100000
+FB, FB_SIZE = 0x9e000000, 0x1700000
 SWEET_ECID = 0x5357454554000001  # 'SWEET' + 1, synthetic
 FB_W, FB_H, FB_STRIDE = 1080, 2400, 1080 * 4
+UART, UART_SIZE = 0x70100000, 0x1000
 # Internal UFS host (ufshc@1d84000 "ufs_mem"); QEMU virt has none
 UFS, UFS_SIZE = 0x01d84000, 0x3000
 TIMEBASE = 19200000
-VTIMER_INTID = 19
+# UMS512's DT lists timer PPI offsets 13,14,11,10. XNU handles the value
+# returned by ICC_IAR1_EL1, where PPI offsets are in the 16..31 INTID range.
+VTIMER_PPI = 11
+VTIMER_INTID = 16 + VTIMER_PPI
 # QEMU virt (-M virt,gic-version=3 -cpu cortex-a76): GICD/GICR and the generic timer's CNTFRQ
 QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE = 0x08000000, 0x080a0000, 62500000
-QEMU_VTIMER_INTID = 27
+QEMU_VTIMER_PPI = 11
+QEMU_VTIMER_INTID = 16 + QEMU_VTIMER_PPI
+
+# GIC interrupt specifier cells are <type, number, flags>.  Keep the type
+# explicit: 0 is SPI (global interrupt), 1 is PPI (per-CPU interrupt).
+GIC_SPI = 0
+GIC_PPI = 1
+IRQ_LEVEL_HIGH = 4
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -74,8 +86,8 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, highmem=False):
-    """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
+def build(seed=None, qemu=False, highmem=False, ufs=False):
+    """Build the T610YP ADT; pass ufs=True only for the Qualcomm sweet board."""
     phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
     # Carve the panic log off the top so the kernel never allocates over it.
     panic_base = phys_base + mem_size - PANIC_LOG_SIZE
@@ -129,27 +141,30 @@ def build(seed=None, qemu=False, highmem=False):
         # with CSR_ALLOW_UNRESTRICTED_FS (vm_unix.c shared region checks).
         node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])])
 
-    # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
-    # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one
-    # and uses cpus=N to select an initial prefix (N <= 8).
+    # UMS512/T610YP topology from the supplied live DTS: six Cortex-A55 cores
+    # at MPIDR 0x000..0x500 and two Cortex-A75 cores at 0x600..0x700.
+    # The kernel defaults to one CPU and uses cpus=N to select a prefix.
     # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
     cpu_nodes = []
     for core in range(1 if qemu else 8):
+        little = core < 6
+        cluster = 0 if little else 1
+        cluster_core = core if little else core - 6
         cpu_nodes.append(node(f'cpu{core}', [
             ph(),
             ('device_type', cstr('cpu')),
-            ('compatible', cstr('qcom,kryo470') + cstr('ARM,v8')),
+            ('compatible', cstr('arm,cortex-a55' if little else 'arm,cortex-a75') + cstr('arm,armv8')),
             ('reg', u32(core << 8)),  # actual MPIDR Aff1:Aff0, NOT logical ID
             ('cpu-id', u32(core)),   # descriptive: XNU assigns IDs by DT order
-            ('cluster-id', u32(0)),  # descriptive; see ml_parse_cpu_topology
+            ('cluster-id', u32(cluster)),
             ('cluster-type', u32(0)),  # homogeneous CLUSTER_TYPE_SMP, not AMP
             ('die-cluster-id', u32(0)),
-            ('cluster-core-id', u32(core)),
+            ('cluster-core-id', u32(cluster_core)),
             ('l2-cache-id', u32(core)),  # distinct per-core L2 nodes in live FDT
             ('l3-cache-id', u32(0)),     # shared L3
             ('state', cstr('running' if core == 0 else 'stopped')),
             ('timebase-frequency', u32(timebase)),
-            ('clock-frequency', u32(2304000000 if core >= 6 else 1804800000)),
+            ('clock-frequency', u32(1800000000 if little else 2000000000)),
             ('bus-frequency', u32(100000000)),
             ('memory-frequency', u32(1866000000)),
             ('peripheral-frequency', u32(timebase)),
@@ -162,9 +177,46 @@ def build(seed=None, qemu=False, highmem=False):
         ph(),
         ('compatible', cstr('arm,gic-v3')),
         ('interrupt-controller', b''),
+        ('#interrupt-cells', u32(3)),
+        ('#address-cells', u32(2)),
+        ('#size-cells', u32(2)),
+        ('redistributor-stride', u64(0x20000)),
+        ('#redistributor-regions', u32(1)),
+        ('interrupts', u32(GIC_PPI, 9, IRQ_LEVEL_HIGH)),
         ('virtual-timer-intid', u32(QEMU_VTIMER_INTID if qemu else VTIMER_INTID)),
         ('reg', u64(gicd - SOC_BASE, GICD_SIZE, gicr - SOC_BASE, GICR_SIZE)),
     ])
+    timer_ints = (GIC_PPI, 13, IRQ_LEVEL_HIGH, GIC_PPI, 14, IRQ_LEVEL_HIGH,
+                  GIC_PPI, QEMU_VTIMER_PPI, IRQ_LEVEL_HIGH, GIC_PPI, 10,
+                  IRQ_LEVEL_HIGH) if qemu else \
+        (GIC_PPI, 13, IRQ_LEVEL_HIGH, GIC_PPI, 14, IRQ_LEVEL_HIGH,
+         GIC_PPI, VTIMER_PPI, IRQ_LEVEL_HIGH, GIC_PPI, 10, IRQ_LEVEL_HIGH)
+    timer = node('timer', [
+        ph(),
+        ('compatible', cstr('arm,armv8-timer')),
+        ('interrupts', u32(*timer_ints)),
+        ('arm,no-tick-in-suspend', b''),
+    ])
+    pmu = node('pmu', [
+        ph(),
+        ('compatible', cstr('arm,armv8-pmuv3')),
+        ('interrupts', u32(GIC_SPI, 0x70, IRQ_LEVEL_HIGH, GIC_SPI, 0x71,
+                           IRQ_LEVEL_HIGH, GIC_SPI, 0x72, IRQ_LEVEL_HIGH,
+                           GIC_SPI, 0x73, IRQ_LEVEL_HIGH, GIC_SPI, 0x74,
+                           IRQ_LEVEL_HIGH, GIC_SPI, 0x75, IRQ_LEVEL_HIGH,
+                           GIC_SPI, 0x76, IRQ_LEVEL_HIGH, GIC_SPI, 0x77,
+                           IRQ_LEVEL_HIGH)),
+    ])
+    uart = node('uart0', [
+        ph(),
+        ('device_type', cstr('serial')),
+        ('compatible', cstr('sprd,ums512-uart') + cstr('sprd,serial')),
+        ('reg', u64(UART - SOC_BASE, UART_SIZE)),
+        ('clock-always-on', u32(1)),
+    ])
+    arm_children = [gic]
+    if not qemu:
+        arm_children += [timer, pmu, uart]
     arm_io = node('arm-io', [
         ph(),
         ('device_type', cstr('sweet-io')),
@@ -172,7 +224,7 @@ def build(seed=None, qemu=False, highmem=False):
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
         ('ranges', u64(0, SOC_BASE, 0x100000000 - SOC_BASE)),
-    ], [gic,
+    ], arm_children + [
         # No hardware: watchdogd checks IODeviceTree:/arm-io/wdt for no-pmu and
         # otherwise crashes trying to set the PMU boot stage (customer builds
         # ignore the -wdt_no_pmu boot-arg).
@@ -198,7 +250,7 @@ def build(seed=None, qemu=False, highmem=False):
     ])
 
     # bsd/dev/sweet_ufs.c: the UFS host ABL leaves running (absolute physical reg).
-    ufs = node('sweet-ufs', [
+    ufs_node = node('sweet-ufs', [
         ph(),
         ('compatible', cstr('qcom,ufshc')),
         ('reg', u64(UFS, UFS_SIZE)),
@@ -229,20 +281,26 @@ def build(seed=None, qemu=False, highmem=False):
     # Identity of the iPhone X whose userland runs here: compatible[0] is
     # hw.model/hw.target (D22AP), model is hw.machine/hw.product
     # (iPhone10,3). 'xiaomi,sweet' stays for SweetPlatformExpert matching.
+    children = [chosen, defaults, cpus, arm_io, fbcon, buttons, pram] + product
+    if ufs and not qemu:
+        children.append(ufs_node)
     return node('device-tree', [
         ph(),
-        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') + cstr('qcom,sm7150') + cstr('AppleARM')),
+        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') +
+                      cstr('sprd,ums512') + cstr('unisoc,ums512') +
+                      cstr('sharkl5pro') + cstr('AppleARM')),
         ('model', cstr('iPhone10,3')),
         ('target-type', cstr('D22')),
         ('target-sub-type', cstr('D22AP')),
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons, pram] + product + ([] if qemu else [ufs]))
+    ], children)
 
 
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv)
+    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv,
+                 ufs='--ufs' in sys.argv)
     blob = adt.serialize(root)
     open(sys.argv[1], 'wb').write(blob)
     if '--dump' in sys.argv:

@@ -12,6 +12,9 @@ on:
       machine_config:
         description: xnu MACHINE_CONFIG
         default: SWEET
+      storage_profile:
+        description: Storage integration profile (sprd-early omits storage drivers)
+        default: sprd-early
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
@@ -19,7 +22,6 @@ on:
     branches: [main]
     paths:
       - "xnu/patches/**"
-      - "tools/make-t610yp-adt.py"
       - ".github/workflows/xnu.yml"
 
 concurrency:
@@ -31,7 +33,7 @@ env:
   DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
   MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
-  MACHINE_CONFIG: SWEET
+  MACHINE_CONFIG: ${{ inputs.machine_config || 'SWEET' }}
 
 jobs:
   build:
@@ -40,26 +42,60 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Fetch build script
         run: |
           git init -q dxb
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
-          rm -f dxb/patches/0001-new-clang-drop-removed-auto-var-init-flag.patch \
-                dxb/patches/0002-new-clang-backport-UIO_STACKBUF.patch \
-                dxb/patches/0010-sweet-early-framebuffer-debug.patch \
-                dxb/patches/0005-non-pac-build-fixes.patch \
-                dxb/patches/0011-sweet-physmap-alignment-padding.patch \
-                dxb/patches/ums512-sweet-machine-layer.patch \
-                dxb/patches/ums512-uart.patch
-          for p in 0001-new-clang-drop-removed-auto-var-init-flag.patch 0002-new-clang-backport-UIO_STACKBUF.patch 0004-sweet-machine-config.patch 0005-non-pac-build-fixes.patch 0006-sweet-master-config-open-source-asm-pmap.patch 0007-sweet-stub-apple-internal-headers.patch 0008-sweet-fill-closed-lib-gaps-kpc-stub.patch 0009-sweet-drop-apple-soc-only-exports.patch 0010-sweet-early-framebuffer-debug.patch 0011-sweet-physmap-alignment-padding.patch 0012-sweet-keep-debug-console-after-ttbr0.patch 0013-sweet-kmem-rng-without-corecrypto.patch 0014-sweet-kernel-hmac-prng.patch 0015-sweet-unavailable-trust-cache-runtime.patch 0016-sweet-device-tree-platform-expert.patch 0017-sweet-device-tree-virtual-timer-irq.patch 0018-sweet-boot-cpu-driver.patch; do cp "xnu/patches/$p" dxb/patches/; done
-          cp xnu/patches/ums512/*.patch dxb/patches/
-          echo 'Final XNU patch set:'
-          ls -1 dxb/patches/*.patch | sort
-          grep -nE '0x9e000000|2308.*4320|EARLY_HEIGHT 2340' dxb/patches/0010-sweet-early-framebuffer-debug.patch dxb/patches/0012-sweet-keep-debug-console-after-ttbr0.patch
-          ls -la dxb/patches
+          # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
+          cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          chmod +x dxb/patches/*.sh
+          test -f dxb/patches/0083-sprd-uart-framebuffer-console.patch
+          echo "SPRD UART/framebuffer console patch staged"
+          if [ "${{ inputs.storage_profile || 'sprd-early' }}" = "sprd-early" ]; then
+            # First hardware bring-up: use an explicit dependency-closed set.
+            # Do not leave later Qualcomm/userland patches behind after removing
+            # their prerequisite files (sweet_ufs.c, sweet_touch.c, etc.).
+            find dxb/patches -type f -name '*.patch' -delete
+            for p in \
+              0001-new-clang-drop-removed-auto-var-init-flag.patch \
+              0002-new-clang-backport-UIO_STACKBUF.patch \
+              0003-sweet-framebuffer-serial-console.patch \
+              0004-sweet-machine-config.patch \
+              0005-non-pac-build-fixes.patch \
+              0006-sweet-master-config-open-source-asm-pmap.patch \
+              0007-sweet-stub-apple-internal-headers.patch \
+              0008-sweet-fill-closed-lib-gaps-kpc-stub.patch \
+              0009-sweet-drop-apple-soc-only-exports.patch \
+              0010-sweet-early-framebuffer-debug.patch \
+              0011-sweet-physmap-alignment-padding.patch \
+              0012-sweet-keep-debug-console-after-ttbr0.patch \
+              0013-sweet-kmem-rng-without-corecrypto.patch \
+              0014-sweet-kernel-hmac-prng.patch \
+              0015-sweet-unavailable-trust-cache-runtime.patch \
+              0016-sweet-device-tree-platform-expert.patch \
+              0017-sweet-device-tree-virtual-timer-irq.patch \
+              0018-sweet-boot-cpu-driver.patch \
+              0019-sweet-builtin-pthread.patch \
+              0020-sweet-portable-aes-cbc.patch \
+              0021-sweet-mockfs-ramdisk-root.patch \
+              0022-sweet-ramdisk-root-without-iomedia.patch \
+              0023-sweet-builtin-sha256-for-libkern.patch \
+              0024-sweet-mockfs-virtual-ramdisk-io.patch \
+              0025-sweet-builtin-amfi-no-entitlements.patch \
+              0026-sweet-builtin-hfs.patch \
+              0027-sweet-bearssl-md5.patch \
+              0065-sweet-smp-psci.patch \
+              0078-sweet-smp-8-cores.patch \
+              0083-sprd-uart-framebuffer-console.patch; do
+              test -f xnu/patches/$p
+              cp xnu/patches/$p dxb/patches/$p
+            done
+          fi
+          # eMMC is intentionally deferred until XNU console/platform startup works.
+          rm -f dxb/patches/0082-sprd-emmc-probe.patch
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
           grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
@@ -86,31 +122,6 @@ jobs:
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
 
-      - name: Show first XNU errors
-        if: failure()
-        working-directory: dxb
-        run: |
-          set +e
-          for log in build.log build/xnu.log /tmp/xnu-build.log; do
-            if [ -s "$log" ]; then
-              echo "===== $log: first errors ====="
-              grep -n -E '(^|[[:space:]])(error:|fatal error:|undefined symbol|symbol\(s\) not found|No rule to make target)' "$log" | head -n 80
-            fi
-          done
-          find . -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null |
-            xargs -0 grep -n -E '(^|[[:space:]])(error:|fatal error:|undefined symbol|symbol\(s\) not found|No rule to make target)' 2>/dev/null |
-            head -n 80
-
-      - name: Generate T610YP ADT
-        if: always()
-        run: |
-          python3 tools/make-t610yp-adt.py \
-            --output "$RUNNER_TEMP/t610yp.adt" \
-            --dram-size 0x40000000 \
-            --owned-memory-size 0x10000000 \
-            --cpu-regs 0,0x100,0x200,0x300,0x400,0x500,0x600,0x700 \
-            --unique-chip-id 0x554d533531325450
-
       - name: Package build tree for local compiles
         if: always()
         run: |
@@ -126,7 +137,7 @@ jobs:
             -C .. sdk-kernel-platform
           ls -la buildtree.tgz
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: xnu-buildtree
@@ -150,15 +161,12 @@ jobs:
         run: |
           mkdir -p out
           cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
-          cp -p "$RUNNER_TEMP/t610yp.adt" out/t610yp.adt 2>/dev/null || true
           ls -la out
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: xnu-kernel
-          path: |
-            out/
-            ${{ runner.temp }}/t610yp.adt
+          path: out/
           if-no-files-found: warn
