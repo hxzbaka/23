@@ -49,12 +49,16 @@ jobs:
           git -C dxb checkout -q FETCH_HEAD
           rm -f dxb/patches/0001-new-clang-drop-removed-auto-var-init-flag.patch \
                 dxb/patches/0002-new-clang-backport-UIO_STACKBUF.patch \
+                dxb/patches/0010-sweet-early-framebuffer-debug.patch \
                 dxb/patches/0005-non-pac-build-fixes.patch \
                 dxb/patches/0011-sweet-physmap-alignment-padding.patch \
                 dxb/patches/ums512-sweet-machine-layer.patch \
                 dxb/patches/ums512-uart.patch
-          for p in 0001-new-clang-drop-removed-auto-var-init-flag.patch 0002-new-clang-backport-UIO_STACKBUF.patch 0004-sweet-machine-config.patch 0005-non-pac-build-fixes.patch 0006-sweet-master-config-open-source-asm-pmap.patch 0007-sweet-stub-apple-internal-headers.patch 0008-sweet-fill-closed-lib-gaps-kpc-stub.patch 0009-sweet-drop-apple-soc-only-exports.patch 0011-sweet-physmap-alignment-padding.patch 0012-sweet-keep-debug-console-after-ttbr0.patch 0013-sweet-kmem-rng-without-corecrypto.patch 0014-sweet-kernel-hmac-prng.patch 0015-sweet-unavailable-trust-cache-runtime.patch 0016-sweet-device-tree-platform-expert.patch 0017-sweet-device-tree-virtual-timer-irq.patch 0018-sweet-boot-cpu-driver.patch; do cp "xnu/patches/$p" dxb/patches/; done
+          for p in 0001-new-clang-drop-removed-auto-var-init-flag.patch 0002-new-clang-backport-UIO_STACKBUF.patch 0004-sweet-machine-config.patch 0005-non-pac-build-fixes.patch 0006-sweet-master-config-open-source-asm-pmap.patch 0007-sweet-stub-apple-internal-headers.patch 0008-sweet-fill-closed-lib-gaps-kpc-stub.patch 0009-sweet-drop-apple-soc-only-exports.patch 0010-sweet-early-framebuffer-debug.patch 0011-sweet-physmap-alignment-padding.patch 0012-sweet-keep-debug-console-after-ttbr0.patch 0013-sweet-kmem-rng-without-corecrypto.patch 0014-sweet-kernel-hmac-prng.patch 0015-sweet-unavailable-trust-cache-runtime.patch 0016-sweet-device-tree-platform-expert.patch 0017-sweet-device-tree-virtual-timer-irq.patch 0018-sweet-boot-cpu-driver.patch; do cp "xnu/patches/$p" dxb/patches/; done
           cp xnu/patches/ums512/*.patch dxb/patches/
+          echo 'Final XNU patch set:'
+          ls -1 dxb/patches/*.patch | sort
+          grep -nE '0x9e000000|2308.*4320|EARLY_HEIGHT 2340' dxb/patches/0010-sweet-early-framebuffer-debug.patch dxb/patches/0012-sweet-keep-debug-console-after-ttbr0.patch
           ls -la dxb/patches
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
