@@ -146,12 +146,15 @@ jobs:
         run: |
           mkdir -p out
           cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          cp -p "$RUNNER_TEMP/t610yp.adt" out/t610yp.adt 2>/dev/null || true
           ls -la out
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: xnu-kernel
-          path: out/
+          path: |
+            out/
+            ${{ runner.temp }}/t610yp.adt
           if-no-files-found: warn
