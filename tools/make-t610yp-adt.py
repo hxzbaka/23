@@ -82,7 +82,12 @@ if args.root_match_volume_uuid:
     chosen.append(prop('root-matching', xml.encode()))
 if args.data_ramdisk or args.packed_data_ramdisk:
     chosen.append(prop('ephemeral-storage', u32(1)))
-memory_map = [node('memory-map', [prop('RAMDisk', bytes(16)), prop('PackedRAMDisk', bytes(16)), prop('TrustCache', bytes(16))])]
+memory_props = []
+if args.data_ramdisk or args.packed_data_ramdisk:
+    memory_props.append(prop('PackedRAMDisk' if args.packed_data_ramdisk else 'RAMDisk', bytes(16)))
+if args.trust_cache:
+    memory_props.append(prop('TrustCache', bytes(16)))
+memory_map = [node('memory-map', memory_props)] if memory_props else []
 
 arm_io = node('arm-io', [prop('device_type', b'arm-io\0'), prop('#address-cells', u32(2)),
     prop('#size-cells', u32(2)), prop('ranges', struct.pack('<QQQ', 0, 0x12000000, 0x5f000000))], [
