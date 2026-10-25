@@ -1,7 +1,7 @@
-diff --git a/config/MASTER.arm64.bcm2837 b/config/MASTER.arm64.bcm2837
+diff --git a/config/MASTER.arm64.sweet b/config/MASTER.arm64.sweet
 index 1ed75ee..3b2f211 100644
---- a/config/MASTER.arm64.bcm2837
-+++ b/config/MASTER.arm64.bcm2837
+--- a/config/MASTER.arm64.sweet
++++ b/config/MASTER.arm64.sweet
 @@ -16,7 +16,7 @@
  #  Standard Apple OS Configurations:
  #  -------- ----- -- ---------------

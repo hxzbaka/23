@@ -11,7 +11,7 @@ on:
         default: DEVELOPMENT
       machine_config:
         description: xnu MACHINE_CONFIG
-        default: BCM2837
+        default: SWEET
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
@@ -31,7 +31,7 @@ env:
   DXB_SHA: 663906528d1cd5ea8fde7de6f16de73db9511549
   MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
-  MACHINE_CONFIG: BCM2837
+  MACHINE_CONFIG: SWEET
 
 jobs:
   build:
@@ -51,9 +51,9 @@ jobs:
                 dxb/patches/0002-new-clang-backport-UIO_STACKBUF.patch \
                 dxb/patches/0005-non-pac-build-fixes.patch \
                 dxb/patches/0011-sweet-physmap-alignment-padding.patch \
-                dxb/patches/ums512-open-machine-layer.patch \
+                dxb/patches/ums512-sweet-machine-layer.patch \
                 dxb/patches/ums512-uart.patch
-          for p in 0001-new-clang-drop-removed-auto-var-init-flag.patch 0002-new-clang-backport-UIO_STACKBUF.patch 0005-non-pac-build-fixes.patch 0011-sweet-physmap-alignment-padding.patch; do cp "xnu/patches/$p" dxb/patches/; done
+          for p in 0001-new-clang-drop-removed-auto-var-init-flag.patch 0002-new-clang-backport-UIO_STACKBUF.patch 0004-sweet-machine-config.patch 0005-non-pac-build-fixes.patch 0006-sweet-master-config-open-source-asm-pmap.patch 0007-sweet-stub-apple-internal-headers.patch 0008-sweet-fill-closed-lib-gaps-kpc-stub.patch 0009-sweet-drop-apple-soc-only-exports.patch 0011-sweet-physmap-alignment-padding.patch 0012-sweet-keep-debug-console-after-ttbr0.patch 0013-sweet-kmem-rng-without-corecrypto.patch 0014-sweet-kernel-hmac-prng.patch 0015-sweet-unavailable-trust-cache-runtime.patch 0016-sweet-device-tree-platform-expert.patch 0017-sweet-device-tree-virtual-timer-irq.patch 0018-sweet-boot-cpu-driver.patch; do cp "xnu/patches/$p" dxb/patches/; done
           cp xnu/patches/ums512/*.patch dxb/patches/
           ls -la dxb/patches
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
@@ -81,6 +81,21 @@ jobs:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
+
+      - name: Show first XNU errors
+        if: failure()
+        working-directory: dxb
+        run: |
+          set +e
+          for log in build.log build/xnu.log /tmp/xnu-build.log; do
+            if [ -s "$log" ]; then
+              echo "===== $log: first errors ====="
+              grep -n -E '(^|[[:space:]])(error:|fatal error:|undefined symbol|symbol\(s\) not found|No rule to make target)' "$log" | head -n 80
+            fi
+          done
+          find . -type f \( -name '*.log' -o -name '*.out' \) -print0 2>/dev/null |
+            xargs -0 grep -n -E '(^|[[:space:]])(error:|fatal error:|undefined symbol|symbol\(s\) not found|No rule to make target)' 2>/dev/null |
+            head -n 80
 
       - name: Generate T610YP ADT
         if: always()
