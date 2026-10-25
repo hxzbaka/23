@@ -104,7 +104,13 @@ arm_io = node('arm-io', [prop('device_type', b'arm-io\0'), prop('#address-cells'
     node('uart0', [prop('compatible', b'sprd,ums512-uart\0'),
         prop('reg', struct.pack('<QQ', 0x5e100000, 0x1000)), prop('clock-always-on', u32(1))]),
     node('framebuffer', [prop('compatible', b'uefi,framebuffer\0'),
-        prop('reg', struct.pack('<QQ', 0x9e000000, 0x01000000))])])
+        prop('reg', struct.pack('<QQ', 0x9e000000, 0x01000000)),
+        prop('width', u32(1080)), prop('height', u32(2340)),
+        prop('stride', u32(4320)), prop('depth', u32(32))]),
+    node('sweet-fbcon', [prop('compatible', b'sweet,framebuffer-console\0'),
+        prop('reg', struct.pack('<QQ', 0x9e000000, 0x01000000)),
+        prop('width', u32(1080)), prop('height', u32(2340)),
+        prop('stride', u32(4320)), prop('depth', u32(32))])])
 
 tree = node('device-tree', [prop('model', b'SharkL5Pro T610YP\0'),
     prop('compatible', b'unisoc,ums512\0sprd,sharkl5pro\0')], [

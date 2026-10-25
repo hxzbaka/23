@@ -58,7 +58,7 @@ diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
 +static void
 +sprd_uart_transmit_data(uint8_t c)
 +{
-+	while (!sprd_uart_transmit_ready()) { }
++	for (unsigned int timeout = 100000; timeout && !sprd_uart_transmit_ready(); timeout--) { }
 +	sprd_uart_write(SPRD_UART_TXD, c);
 +}
 +
@@ -71,7 +71,7 @@ diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
 +static uint8_t
 +sprd_uart_receive_data(void)
 +{
-+	while (!sprd_uart_receive_ready()) { }
++	for (unsigned int timeout = 100000; timeout && !sprd_uart_receive_ready(); timeout--) { }
 +	return (uint8_t)sprd_uart_read(SPRD_UART_RXD);
 +}
 +
